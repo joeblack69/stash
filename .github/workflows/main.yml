@@ -1,1 +1,86 @@
+name: Update Rule Headers
+
+on:
+  push:
+    paths:
+      - "rules/gemini.yaml"
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  update-headers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Update headers
+        run: |
+          python3 << 'EOF'
+          import os, yaml, datetime, re
+
+          rules_dir = "rules"
+
+          for filename in os.listdir(rules_dir):
+              if not filename.endswith(".yaml"):
+                  continue
+
+              path = os.path.join(rules_dir, filename)
+
+              with open(path, "r", encoding="utf-8") as f:
+                  content = f.read()
+
+              payload_match = re.search(r"payload:\s*(.*)", content, re.S)
+              if not payload_match:
+                  continue
+
+              payload_text = payload_match.group(1)
+
+              domain = len(re.findall(r"DOMAIN,", payload_text))
+              domain_suffix = len(re.findall(r"DOMAIN-SUFFIX,", payload_text))
+              domain_keyword = len(re.findall(r"DOMAIN-KEYWORD,", payload_text))
+              total = domain + domain_suffix + domain_keyword
+
+              updated_time = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+              def replace_or_add(tag, value):
+                  pattern = rf"# {tag}:.*"
+                  replacement = f"# {tag}: {value}"
+                  if re.search(pattern, content):
+                      return re.sub(pattern, replacement, content)
+                  else:
+                      return replacement + "\n" + content
+
+              content = replace_or_add("UPDATED", updated_time)
+              content = replace_or_add("DOMAIN", domain)
+              content = replace_or_add("DOMAIN-SUFFIX", domain_suffix)
+              content = replace_or_add("DOMAIN-KEYWORD", domain_keyword)
+              content = replace_or_add("TOTAL", total)
+
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(content)
+
+          EOF
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "Auto update rule headers" || echo "No changes to commit"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@v0.6.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
